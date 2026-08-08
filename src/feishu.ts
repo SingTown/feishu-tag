@@ -258,6 +258,23 @@ export async function notifyThread(threadId: string, text: string): Promise<void
   await replyToThread(threadId, 'interactive', markdownCard(text))
 }
 
+/**
+ * 被 @ 的消息收到即贴「我我我」表情当回执,填沙箱冷启动到首条回复之间的静默期(index.ts 调)。
+ * messageId 来自 bot 自己收到的事件,归属可信,不查详情核对(同 prepareImages)。
+ * best-effort:失败只记日志、从不抛,最坏退回没有表情的现状,不能挡回复。
+ */
+export async function ackReceipt(messageId: string): Promise<void> {
+  try {
+    const r = await cli().im.v1.messageReaction.create({
+      data: { reaction_type: { emoji_type: 'MeMeMe' } },
+      path: { message_id: messageId },
+    })
+    if (r.code) console.error(`[feishu] 回执表情被拒 msg=${messageId} code=${r.code}: ${r.msg}`)
+  } catch (err) {
+    console.error(`[feishu] 回执表情失败 msg=${messageId}:`, errText(err))
+  }
+}
+
 async function sendAttachment(chatId: string, threadId: string, p: string): Promise<string> {
   // 路径按沙箱内解:相对的接工作区,绝对的原样。不用再防越界——解析发生在沙箱里,
   // 软链指不出沙箱,能拷到的本来就都是 agent 自己读得到的东西

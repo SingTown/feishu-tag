@@ -25,7 +25,8 @@ process.chdir(path.resolve(fileURLToPath(import.meta.url), '../..'))
 // 下面只列模板**没有**的增量。运行时依赖对照(模板已覆盖,2026-08-07 实测过确认页清单):
 //   @ 消息事件 / message.list、get 拉历史 / message.reply、delete 回话题撤卡片 /
 //   image、file.create 与 messageResource.get 传取附件 / chatMembers.get 查群成员 /
-//   im.message.receive_v1 接收消息事件 / card.action.trigger 密钥卡片回调
+//   im.message.receive_v1 接收消息事件 / card.action.trigger 密钥卡片回调 /
+//   messageReaction.create 贴回执表情(2026-08-08 现网实测已覆盖)
 //
 // feishu.ts / bot.ts 新调接口报 99991672 的话,把错误消息里点名的 scope 加进下面数组
 // (照着 "One of the following scopes is required: [...]" 那串抄,比查文档准;名字写错

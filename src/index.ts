@@ -1,7 +1,7 @@
 import { FeishuBot } from './bot.ts'
 import { authEnv, ensureHostReady, startIdleReaper } from './sandbox.ts'
 import { hasActiveSandbox, replyWithAgent, shouldHandle } from './agent.ts'
-import { handleSecretCardAction } from './feishu.ts'
+import { ackReceipt, handleSecretCardAction } from './feishu.ts'
 import { startFollowupScheduler, wakeMessage } from './followup.ts'
 
 // 飞书 SDK 在定时器里发请求、Promise 被 void 掉,业务侧挂不上 catch,不能让它带崩长连接进程。
@@ -28,6 +28,8 @@ bot.channel.on('cardAction', handleSecretCardAction)
 bot.onMessage(async (msg) => {
   if (!await shouldHandle(msg)) return
   console.log(`[消息] chat=${msg.chatId} thread=${msg.threadId} text=${msg.text}`)
+  // 免 @ 不贴:接不接话是模型的判断,贴了回执却可能没下文。也不能 await——按群串行,多等一拍全群堵一拍
+  if (msg.mentionedBot) void ackReceipt(msg.messageId)
   // 不等回合跑完。LarkChannel 按群串行,handler 挂着的话回合进行中到的消息根本递不进去。
   // 代价是同群不同话题会真并发,可能同时动一个工作区,冲突让模型自己从报错里看出来
   void replyWithAgent(msg)
