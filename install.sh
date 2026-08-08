@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# feishu-tag 一键安装器,README 的唯一部署入口:
+# feishu-tag 一键安装/升级器,README 的唯一部署入口:
 #   curl -fsSL .../install.sh | bash   —— 自举:自动 clone 到 ~/feishu-tag 再换乘仓库里那份
 #   ./install.sh                       —— 已 clone 的仓库里直接跑,同一个文件同一条路
+# 重跑即升级:maybe_update 发现落后上游就问一声、快进、重跑自己,自启段照着
+# FEISHU_TAG_UPDATED 用新代码重启服务。
 # 管道形态只负责 clone,然后把 stdin 换成 /dev/tty 交给文件形态;真无头(没有终端)才拒绝。
 #
 # 分工(2026-08-08 拍板):sh 只做「Node 存在之前」的事——
@@ -53,7 +55,9 @@ die() { printf '\n✗ %s\n' "$1" >&2; exit 1; }
 
 confirm() {  # 空回车 = 是:重跑是常态,一路回车必须依旧安全
   local a
-  read -r -p "$1 [Y/n] " a
+  # EOF 必须当场死:tty 里输入流也可能断(Ctrl-D、pty 被关),read 失败还往下走
+  # 就成了「全部自动应答是」,能把服务都静默拉起来(实测踩过)
+  read -r -p "$1 [Y/n] " a || die '输入中断,重跑 ./install.sh 继续'
   case "$a" in ''|y|Y|yes|Yes|YES) return 0 ;; *) return 1 ;; esac
 }
 
@@ -75,15 +79,15 @@ env_set() {
 in_repo() { [ -f package.json ] && grep -q '"name": "feishu-tag"' package.json; }
 
 # 找到仓库根并 cd 进去,身边没有就 clone 到 ~/feishu-tag——mac「必须在 $HOME 下」的
-# 约束顺带自动满足。已 clone 过就直接用现有的,不 git pull:不动用户本地的改动。
-# FEISHU_TAG_REPO 是测试缝隙(指到 file:// 本地镜像),平时不用碰
+# 约束顺带自动满足。已 clone 过就直接用现有的,这里不 pull:拉新版归 maybe_update,
+# 确认制、不悄悄动本地。FEISHU_TAG_REPO 是测试缝隙(指到 file:// 本地镜像),平时不用碰
 ensure_repo() {
   in_repo && return 0
   local dest="$HOME/feishu-tag"
   say "获取仓库到 $dest"
   command -v git >/dev/null 2>&1 || die '缺 git:mac 跑 xcode-select --install,Debian/Ubuntu 跑 sudo apt-get install -y git,装完重跑'
   if [ -d "$dest/.git" ]; then
-    echo '已经 clone 过了,直接用现有的(不会动你本地的改动)。'
+    echo '已经 clone 过了,直接用现有的(有新版本的话稍后会问要不要升级)。'
   elif [ -e "$dest" ]; then
     die "$dest 已存在但不是这个仓库,挪开它再跑"
   else
@@ -115,6 +119,41 @@ echo '每一步都会先看你是不是已经做过了,随时可以中断、重�
 
 # 非交互式下 read 拿到 EOF,confirm 会一路当「是」把 bot 起了,宁可当场停
 [ -t 0 ] || { RESCUE_ON=0; die '要在交互式终端里跑:要扫码确认应用,还要粘贴令牌。'; }
+
+# ---- 升级:重跑本脚本即升级,这一步只负责把代码带到最新 ----
+# 落后上游且本地干净时,确认后快进并重跑自己;其余步骤本来就幂等,重跑一遍即完成升级。
+# FEISHU_TAG_UPDATED 只表示「本轮是升级后的重跑」:自启段看到它才知道该重启服务换代码
+# (须经 sg/exec 存活,所以走环境变量,和 FEISHU_TAG_SG 同款)。
+# package-lock.json 会被不同版本的 npm 重写(libc 字段之类),只有它脏就直接还原;
+# 其他任何本地改动都不碰,宁可不升级——和 ensure_repo 不 pull 是同一条底线
+maybe_update() {
+  [ -n "${FEISHU_TAG_UPDATED:-}" ] && { echo '刚升到最新,继续走完其余步骤。'; return 0; }
+  git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 || return 0  # 没上游的本地实验仓,不管
+  git fetch --quiet 2>/dev/null || { echo '(联不上上游,跳过检查更新)'; return 0; }
+  local behind ahead dirty
+  behind="$(git rev-list --count 'HEAD..@{u}')"
+  [ "$behind" = 0 ] && { echo '已是最新。'; return 0; }
+  ahead="$(git rev-list --count '@{u}..HEAD')"
+  if [ "$ahead" != 0 ]; then
+    echo "上游有新版本,但本地多 $ahead 个自己的提交(分叉了),不自动升级。"
+    return 0
+  fi
+  dirty="$(git status --porcelain | grep -v '^??' || true)"
+  if [ -n "$dirty" ] && ! printf '%s\n' "$dirty" | grep -qv 'package-lock\.json'; then
+    git checkout -- package-lock.json   # npm 重写的,不算用户改动
+    dirty=''
+  fi
+  if [ -n "$dirty" ]; then
+    printf '上游有新版本(落后 %s 个提交),但本地有改动,不自动升级:\n%s\n' "$behind" "$dirty"
+    echo '处理完(commit / stash / checkout)重跑 ./install.sh 即可升级。'
+    return 0
+  fi
+  confirm "上游有新版本(落后 $behind 个提交),现在升级?" || return 0
+  git merge --ff-only '@{u}' || die '快进失败:git status 看看,处理完重跑'
+  exec env FEISHU_TAG_UPDATED=1 bash "$SCRIPT"
+}
+say '检查更新'
+maybe_update
 
 SUDO=sudo
 [ "$(id -u)" = 0 ] && SUDO=''
@@ -334,7 +373,15 @@ autostart_linux() {
   fi
   local content; content="$(unit_content)"
   if same_file "$content" "$UNIT_PATH" && systemctl is-enabled --quiet feishu-tag 2>/dev/null; then
-    echo '开机自启已配置(没在跑就 systemctl start feishu-tag)。'
+    if [ -n "${FEISHU_TAG_UPDATED:-}" ]; then
+      echo '重启服务,加载新代码……'
+      $SUDO systemctl restart feishu-tag
+      sleep 2
+      systemctl is-active --quiet feishu-tag || die '服务没起来:journalctl -u feishu-tag -e 看看'
+      echo '升级完成,服务已在新代码上运行。'
+    else
+      echo '开机自启已配置(没在跑就 systemctl start feishu-tag)。'
+    fi
     return 0
   fi
   if ! confirm '设为开机自启并现在启动?(选 n 走前台 npm start)'; then
@@ -354,7 +401,14 @@ autostart_linux() {
 autostart_darwin() {
   local content uid; content="$(plist_content)"; uid="$(id -u)"
   if same_file "$content" "$PLIST_PATH" && launchctl print "gui/$uid/local.feishu-tag" >/dev/null 2>&1; then
-    echo '开机自启已配置(登录自启)。'
+    if [ -n "${FEISHU_TAG_UPDATED:-}" ]; then
+      echo '重启服务,加载新代码……'
+      launchctl bootout "gui/$uid/local.feishu-tag" 2>/dev/null || true
+      launchctl bootstrap "gui/$uid" "$PLIST_PATH"
+      echo '升级完成,服务已在新代码上运行。'
+    else
+      echo '开机自启已配置(登录自启)。'
+    fi
     return 0
   fi
   if ! confirm '设为开机自启并现在启动?(选 n 走前台 npm start)'; then

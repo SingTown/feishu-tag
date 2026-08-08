@@ -74,6 +74,9 @@ curl -fsSL https://raw.githubusercontent.com/singtown/feishu-tag/main/install.sh
 
 没设自启就 `npm start` 前台跑,得一直开着;服务在跑时别再手动 `npm start`,会双连重复收消息。
 
+**升级**也是重跑这条安装命令(或仓库里 `./install.sh`):发现新版本会先问你,确认后
+自动拉取并重启服务。本地改过代码的话它不会动,提示你处理完再来。
+
 装完把机器人拉进群,@ 它说句话。mac 首次启动要建虚拟机,约几分钟;每个群第一次说话
 要建自己的沙箱,约 1 分钟——静默等着不是坏了,之后每轮秒回。
 

@@ -18,7 +18,7 @@ npm install           # npm(随 Node 自带),package-lock.json 为准;allowScrip
                       # 是审过的拒绝(postinstall 只打印版本建议),别改成 true
 npm run typecheck     # 唯一的自动化验证(无测试、无 lint)
 npm start             # 无构建:Node ≥22.18 原生 type stripping 直接跑 .ts
-./install.sh          # 一键安装(README 的 curl | bash 也是它),坑单见文件头
+./install.sh          # 一键安装/升级(重跑即升级,README 的 curl | bash 也是它),坑单见文件头
 npm run register      # 建应用;改了权限清单也是重跑它,确认页选中现网应用 = 增量开通
 ```
 
