@@ -255,9 +255,15 @@ async function doEnsure(chatId: string): Promise<void> {
   let inst = await sandboxInfo(name)
   if (!inst) {
     console.log(`[sandbox] 新建群沙箱 ${name}(首次要拉基础镜像)…`)
-    // create → 配 idmap → 挂盘 → start 而不是 launch:
+    // create → 配置 → 挂盘 → start 而不是 launch:
     // 挂载点和 uid 映射都要赶在沙箱第一次跑 provision 之前就位
     await run(CLI, ['create', BASE_IMAGE, name])
+    // 嵌套全开:沙箱里能再起一层容器(agent 装 Docker、开发本项目起探针沙箱都靠它)。
+    // 内层要跑 Incus 还得把内层 /etc/subuid 缩窄(root:1000000:1000000 实测可用):
+    // 外层映射默认 10 亿宽、从 1000000 起,内层默认段也是 10 亿,错着位装不进去。
+    // 别设 security.idmap.size 去"配合"内层:6.0 无视它,7.x 真收窄反而埋雷。
+    // 只在新建时设:存量沙箱手动补同一个键即可,和 raw.idmap 一样下次启动才生效
+    await execFile(CLI, ['config', 'set', name, 'security.nesting=true'])
     if (CLAUDE_IDMAP) await execFile(CLI, ['config', 'set', name, `${IDMAP_KEY}=${CLAUDE_IDMAP}`])
     await addClaudeDevice(name, dataDir)
     await execFile(CLI, ['start', name])
