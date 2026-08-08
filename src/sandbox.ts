@@ -1,6 +1,6 @@
 import { execFile as execFileCb, spawn } from 'node:child_process'
 import { hash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -205,10 +205,50 @@ async function attachClaudeDir(name: string, dir: string): Promise<void> {
 }
 
 /**
+ * Docker 共存:Docker 会把 iptables 的 FORWARD 默认策略改成 DROP,而 nftables 语义下
+ * incus 自己表里的 accept 压不过别的表里的 drop——沙箱的 IPv4 转发全被宿主丢弃。
+ * IPv6 不受影响,症状因此很迷惑:有 AAAA 的站能通(apt 常常没事),其余全部连接超时。
+ * 修法是 Incus 官方口径:往 Docker 留给用户的 DOCKER-USER 链插 incus 网桥的双向放行
+ * (docker 重启不清这条链,但机器重启会)。规则丢了只在沙箱要跑时咬人,所以在每次
+ * ensure 断言,本进程补成功过一次就不再查;docker 事后才装也一样被兜住。
+ * sudo 白名单由 install.sh 写在 /etc/sudoers.d/feishu-tag,只放行这四条**逐字匹配**的
+ * 命令——iptables 路径或参数改了必须同步改那边,对不上 sudo 会拒。
+ * 失败只告警不拦路:规则可能已被管理员用别的方式放行,-C 在 sudo 被拒时也区分不出
+ * "规则已在",拦了反而误伤。
+ */
+const IPTABLES = '/usr/sbin/iptables'
+let dockerCoexistDone = process.platform !== 'linux'
+let dockerCoexistWarned = false
+async function ensureDockerCoexist(): Promise<void> {
+  if (dockerCoexistDone || !existsSync('/var/run/docker.sock')) return
+  const nets = await execFile(CLI, ['query', '/1.0/networks?recursion=1'])
+    .then((r) => JSON.parse(r.stdout) as { name: string; type: string; managed: boolean }[], () => [])
+  const bridge = nets.find((n) => n.managed && n.type === 'bridge')?.name
+  if (!bridge) return
+  for (const flag of ['-i', '-o']) {
+    const rule = ['DOCKER-USER', flag, bridge, '-j', 'ACCEPT']
+    if (await execFile('sudo', ['-n', IPTABLES, '-C', ...rule]).then(() => true, () => false)) continue
+    try {
+      await execFile('sudo', ['-n', IPTABLES, '-I', ...rule])
+      console.log(`[sandbox] 已补 Docker 共存放行:iptables -I ${rule.join(' ')}`)
+    } catch (err) {
+      if (!dockerCoexistWarned) {
+        dockerCoexistWarned = true
+        console.error('[sandbox] 检测到 Docker,但补不上 DOCKER-USER 的放行,沙箱 IPv4 可能被 ' +
+          `FORWARD DROP 闷死(症状:沙箱里只有 IPv6 站能通)。重跑一次 ./install.sh 配 sudo 白名单。原始错误:${(err as Error).message ?? err}`)
+      }
+      return
+    }
+  }
+  dockerCoexistDone = true
+}
+
+/**
  * 保证本群沙箱存在、在跑、挂好数据目录、provision 到位。
  * provision 幂等且秒级,指纹对得上就整个跳过。
  */
 async function doEnsure(chatId: string): Promise<void> {
+  await ensureDockerCoexist()
   const name = sandboxName(chatId)
   const dataDir = claudeDir(chatId)
   await mkdir(dataDir, { recursive: true, mode: 0o700 })

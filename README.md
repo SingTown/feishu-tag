@@ -51,6 +51,9 @@
 - **macOS 或 Linux** —— 沙箱靠 Incus,只有这两条路,Windows 上没有。
   mac 要有 [Homebrew](https://brew.sh);Linux 的自动安装覆盖 apt 系(Debian 13+ / Ubuntu 24.04+),
   其他发行版先自装 Node 与 Incus(装法脚本会打出来)。
+  和 Docker 同一台机器可以共存:Docker 默认会掐断别家容器的转发(症状是沙箱里只有部分
+  网站能通),安装器会配好授权、运行时自动补防火墙放行,不用手动处理;
+  装机后才装 Docker 的,重跑一次 `./install.sh` 即可。
 - **一份模型令牌** —— Claude 订阅(`claude setup-token` 生成)或 Anthropic API key,二选一。
 
 ## 运行
