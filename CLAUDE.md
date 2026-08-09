@@ -43,7 +43,6 @@ mcp.ts      工具组共用的 server 搭法(alwaysLoad 的坑见文件头)
 feishu.ts   feishu 工具组 + 图片内联预处理 + 密钥卡片回调
 secrets.ts  第三方凭证:一群一份,正本 sandbox/<id>/secrets.env,值走 stdin 注入
 followup.ts 定时回访:排期落盘,到点合成消息重新唤起 agent
-model.ts    换模型/调 effort 工具组,落盘 + 对活会话即时生效
 register.ts 权限清单 + 扫码建应用,不在运行时链路
 install.sh  一键安装器,仓库唯一的 bash(按 bash 3.2 写):「Node 存在之前」的事 + 收尾开机自启
 provision.sh 沙箱出厂初始化,在沙箱内跑;内容哈希+CLI 版本指纹变了自动重跑

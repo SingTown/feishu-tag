@@ -1,7 +1,7 @@
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
 
-// bot 进程内的工具组(feishu / followup / model)共用的三样东西。
+// bot 进程内的工具组(feishu / followup)共用的三样东西。
 // 各工具组只写自己的工具,server 怎么搭、结果怎么包、全名怎么拼都在这里,别再各写一份。
 
 // SDK 没导出参数类型,从函数签名上取

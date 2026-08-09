@@ -7,7 +7,6 @@ import { authEnv, ensureSandbox, hasSessionRecord, IDLE_STOP_MIN, sandboxId, spa
 import { feishuServer, notifyThread, prepareImages, SEND_ATTACHMENT_TOOL, SEND_MESSAGE_TOOL, SET_SECRET_TOOL } from './feishu.ts'
 import { refreshSecrets, secretNames } from './secrets.ts'
 import { FOLLOWUP_TOOL, followupServer } from './followup.ts'
-import { modelSession } from './model.ts'
 
 // 已知有 session 的话题:收到 system init 就记下,补上文件刚建好、磁盘还查不到的那几秒
 const knownThreads = new Set<string>()
@@ -70,7 +69,7 @@ const idleHint = IDLE_STOP_MIN
  * 它自己能推的一律不写——meta 里那几个字段是什么意思,看一眼就知道,写进来只是占字。
  * mentioned_bot 是**唯一的例外**:正文里 @ 它的那段被平台剥掉了(见 bot.ts),
  * 光看字面推不出来,而且剥完句子会少一截,不说它会当成自己漏读了。
- * 工具怎么用也不写:feishu / followup / model 都是 alwaysLoad,description 每轮都在 prompt 里,
+ * 工具怎么用也不写:feishu / followup 都是 alwaysLoad,description 每轮都在 prompt 里,
  * 由它们自己说(所以改 description 等于改 prompt)。
  * 「发言通道」第二条(第一个动作就是调工具、禁正文旁白)别当重复删:模型习惯先写一句
  * 正文旁白再调工具,约 1/3 的轮次会顺着旁白把整个回复写成正文收场,群里就是零发送;
@@ -91,6 +90,9 @@ const systemPrompt = async (chatId: string) => {
 - 你运行在本群专属的**沙箱**里(一台 Debian 13 的机器,它即本群的隔离边界),工作目录 ${WORKSPACE} 是群工作区,群内所有话题共享,文件产出一律放这里。有免密 sudo,缺工具直接装,$HOME 里的一切平时都一直在。
 - 沙箱可以被管理员整个推倒重建,**只有 ~/.claude 会原样回来**,工作区和你装过的软件不会,真正要留住的产出及时 push 到远端仓库。
 - 网络可自由访问。${await secretsHint(chatId)}
+
+# 模型
+- 模型与 effort 的配置在 ~/.claude/settings.json 的 \`model\` / \`effortLevel\` 键,改完下一轮生效;model 可选 fable / opus / sonnet / haiku,effortLevel 可选 low / medium / high / xhigh。
 
 # 生命周期
 - 每轮回复结束后你的进程即终止,后台任务和内置唤醒机制随之全部失效。${idleHint}要等 CI/构建/部署这类长任务的结果:几分钟内能完的当轮直接等;更久的用 ${FOLLOWUP_TOOL} 排定时回访。
@@ -266,14 +268,11 @@ function startSession(first: BotMessage, prev?: Promise<void>): ThreadSession {
           `回答前先用 list_messages(thread_id 传 ${threadId})拉取本话题历史补上上下文。`
         : ''
 
-      // 换模型的工具组要拿本会话的控制通道(setModel/supportedModels),CLI init 之后 attach
-      const models = modelSession(chatId)
-
       const q = query({
         prompt: stream.iterable,
         options: {
           ...(resume ? { resume: sessionId } : { sessionId }),
-          // 别传 model:模型由群沙箱里的 ~/.claude/settings.json 决定(agent 经 model 工具组改,见 model.ts),
+          // 别传 model:模型由群沙箱里的 ~/.claude/settings.json 决定(agent 直接编辑它,见 systemPrompt 的「模型」节),
           // 这里传了就会压掉那份配置,换模型落的盘从此不生效。
           // settingSources 同理不传(= 全加载,群记忆 ~/.claude/CLAUDE.md 也靠它)
           // 沙箱就是边界,内部免审批全放开
@@ -292,7 +291,6 @@ function startSession(first: BotMessage, prev?: Promise<void>): ThreadSession {
           mcpServers: {
             ...followupServer(chatId, threadId),
             ...feishuServer(chatId, threadId),
-            ...models.server,
           },
         },
       })
@@ -302,7 +300,6 @@ function startSession(first: BotMessage, prev?: Promise<void>): ThreadSession {
       for await (const m of q) {
         if (m.type === 'system') {
           knownThreads.add(threadId)
-          models.attach(q)
         } else if (m.type === 'assistant') {
           for (const b of m.message.content) {
             if (b.type === 'tool_use' && SENDING_TOOLS.has(b.name)) sends++

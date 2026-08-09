@@ -64,8 +64,8 @@ export const SANDBOX_ROOT = path.resolve('sandbox')
 export const sandboxDir = (chatId: string): string => path.join(SANDBOX_ROOT, sandboxId(chatId))
 const claudeDirOf = (id: string): string => path.join(SANDBOX_ROOT, id, 'claude')
 
-/** 挂进沙箱当 `~/.claude` 的那个目录,宿主这半边。模型设置(model.ts)也落在它下面 */
-export const claudeDir = (chatId: string): string => claudeDirOf(sandboxId(chatId))
+/** 挂进沙箱当 `~/.claude` 的那个目录,宿主这半边。模型设置(settings.json,agent 自己改)也落在它下面 */
+const claudeDir = (chatId: string): string => claudeDirOf(sandboxId(chatId))
 
 /**
  * CLI 的会话记录落在 `~/.claude/projects/<按 cwd 生成的目录>/<sessionId>.jsonl`,
