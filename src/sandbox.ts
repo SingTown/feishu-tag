@@ -186,25 +186,6 @@ const addClaudeDevice = (name: string, dir: string): Promise<unknown> => execFil
 ])
 
 /**
- * 给还没挂过的老沙箱补挂数据目录。挂上去会把沙箱里原来的 `~/.claude` **整个遮住**
- * (数据还在沙箱文件系统里,但从此看不见,会话记录当场断档),
- * 所以宿主这边还空着就说明没搬过,当场拦下并给出搬迁命令,别让上下文静默消失。
- */
-async function attachClaudeDir(name: string, dir: string): Promise<void> {
-  const inside = await execFile(CLI, [
-    'exec', name, '-T', '--', 'sh', '-c', `ls -A ${AGENT_HOME}/.claude 2>/dev/null | head -1`,
-  ]).then((r) => r.stdout.trim(), () => '')
-  if (inside && !(await readdir(dir).catch(() => [])).length) {
-    throw new Error(
-      `沙箱 ${name} 里已有 ~/.claude,但宿主 ${dir} 还是空的,直接挂载会把它遮住。先搬出来:\n` +
-      `  incus exec ${name} -T -- tar -C ${AGENT_HOME}/.claude -cf - . | tar -C ${dir} -xf -\n` +
-      `  incus file pull ${name}${WORKSPACE}/CLAUDE.md ${path.join(dir, 'CLAUDE.md')}  # 长期记忆换到 ~/.claude 下了`,
-    )
-  }
-  await addClaudeDevice(name, dir)
-}
-
-/**
  * Docker 共存:Docker 会把 iptables 的 FORWARD 默认策略改成 DROP,而 nftables 语义下
  * incus 自己表里的 accept 压不过别的表里的 drop——沙箱的 IPv4 转发全被宿主丢弃。
  * IPv6 不受影响,症状因此很迷惑:有 AAAA 的站能通(apt 常常没事),其余全部连接超时。
@@ -274,7 +255,8 @@ async function doEnsure(chatId: string): Promise<void> {
       if (inst.status === 'Running') await execFile(CLI, ['restart', name])
     }
     if (inst.status !== 'Running') await execFile(CLI, ['start', name])
-    if (!(CLAUDE_DEVICE in inst.devices)) await attachClaudeDir(name, dataDir)
+    // 设备只可能因"create 成功、挂盘前崩了"而缺,补挂接上中断的新建流程;别删这行当它冗余
+    if (!(CLAUDE_DEVICE in inst.devices)) await addClaudeDevice(name, dataDir)
   }
   if (inst?.config[STAMP_KEY] !== STAMP) {
     console.log(`[sandbox] 初始化/升级沙箱环境 ${name}…`)

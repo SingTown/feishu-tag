@@ -58,11 +58,6 @@ chown agent:agent /home/agent/.bashrc /home/agent/.profile /home/agent/.bash_log
 
 # CLI 的用户配置是两处:~/.claude/ 目录之外还有 ~/.claude.json(user scope 的 MCP 配置等)。
 # 软链进挂载目录,沙箱重建后这半边配置才不会跟着没。
-# 老沙箱里它是真文件,先搬进去再换软链,别直接覆盖
-if [ -f /home/agent/.claude.json ] && [ ! -L /home/agent/.claude.json ]; then
-  mv -n /home/agent/.claude.json /home/agent/.claude/.claude.json 2>/dev/null || true
-  rm -f /home/agent/.claude.json
-fi
 ln -sfn /home/agent/.claude/.claude.json /home/agent/.claude.json
 
 # ——内层 Incus:出厂直接装好配好(沙箱开着 security.nesting,见 src/sandbox.ts)——
