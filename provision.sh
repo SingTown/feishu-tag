@@ -65,6 +65,53 @@ if [ -f /home/agent/.claude.json ] && [ ! -L /home/agent/.claude.json ]; then
 fi
 ln -sfn /home/agent/.claude/.claude.json /home/agent/.claude.json
 
+# ——内层 Incus:出厂直接装好配好(沙箱开着 security.nesting,见 src/sandbox.ts)——
+# 群里用它零步骤;宁可全员多装一个包,不留延迟触发的钩子(socket 激活,不用不耗资源)。
+
+# 内层 uid 段:外层沙箱只分到 10 亿宽,内层默认段(root:1000000:1000000000)错位装不进,
+# 抢在装包前钉窄——incus 的 deb 只在没有 root 条目时才追加,预写即接管(探针实测)
+for f in /etc/subuid /etc/subgid; do
+  grep -q '^root:' "$f" 2>/dev/null || echo 'root:1000000:1000000' >> "$f"
+done
+
+# 宿主 AppArmor 开着时,内层 incusd 的嵌套 profile 会被内核拒(内核半成品),上游口径就是
+# 关掉。要赶在 incusd 第一次启动前就位
+install -d /etc/systemd/system/incus.service.d
+printf '[Service]\nEnvironment=INCUS_SECURITY_APPARMOR=false\n' \
+  > /etc/systemd/system/incus.service.d/override.conf
+
+# 故意不加 --no-install-recommends:dnsmasq-base 等在 Recommends 里,缺了建不了网
+if ! command -v incus >/dev/null 2>&1; then
+  apt-get update -qq
+  apt-get install -y -qq incus
+fi
+
+# 建网单独守卫,装包成功但 init 失败的话下次重跑能自愈。子网写死:自动探测在嵌套里必失败,
+# 段挑得避开外层 incusbr0(随机 10.x)。init 这类 incus 命令读非终端 stdin 等 YAML,
+# 裸跑会永久挂起,stdin 必须像这样喂死
+incus network show incusbr0 >/dev/null 2>&1 || incus admin init --preseed <<'EOF'
+storage_pools:
+- name: default
+  driver: dir
+networks:
+- name: incusbr0
+  config:
+    ipv4.address: 10.201.37.1/24
+    ipv4.nat: "true"
+    ipv6.address: none
+profiles:
+- name: default
+  devices:
+    root:
+      path: /
+      pool: default
+      type: disk
+    eth0:
+      name: eth0
+      network: incusbr0
+      type: nic
+EOF
+
 # 工作区归 agent
 install -d -m 755 -o agent -g agent /home/agent/workspace
 
