@@ -439,8 +439,9 @@ export async function ensureHostReady(): Promise<void> {
     fatal('未找到 incus:装法见 https://linuxcontainers.org/incus/docs/main/installing/'))
   await execFile(CLI, ['query', '/1.0']).catch(() =>
     fatal('incus 服务端不可达:确认守护进程在跑(systemctl status incus),且当前用户在 incus-admin 组里(加完组要重新登录)'))
-  // incus 刚装完是没有存储池的,要跑一次 incus admin init;不拦的话建沙箱时才炸,报错看不出原因
+  // incus 刚装完是没有存储池的,要跑一次 incus admin init;不拦的话建沙箱时才炸,报错看不出原因。
+  // 空列表在 incus 6.0 上打印空串而不是 [](实测),裸 JSON.parse 会炸
   const pools = await execFile(CLI, ['query', '/1.0/storage-pools'])
-    .then((r) => JSON.parse(r.stdout) as unknown[], () => [])
+    .then((r) => JSON.parse(r.stdout || '[]') as unknown[], () => [])
   if (!pools.length) fatal('incus 还没初始化(一个存储池都没有):先跑一次 incus admin init')
 }

@@ -163,6 +163,9 @@ Linux)
 (https://linuxcontainers.org/incus/docs/main/installing/ ,装完 usermod -aG incus-admin 加组、
 重新登录、跑一次 incus admin init --minimal),然后重跑本脚本。'
   if ! node_ok || ! command -v incus >/dev/null 2>&1; then
+    # 上一轮可能把 nodesource keyring 落成 600(本脚本 umask 077,tee 继承;keyring 由
+    # _apt 用户的 sqv 读,读不了会连整个 apt update 一起拒),先自愈再 update
+    [ -f /etc/apt/keyrings/nodesource.asc ] && $SUDO chmod 644 /etc/apt/keyrings/nodesource.asc
     $SUDO apt-get update
   fi
   if ! node_ok; then
@@ -171,6 +174,8 @@ Linux)
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | $SUDO tee /etc/apt/keyrings/nodesource.asc >/dev/null
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x nodistro main" \
       | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+    # 本脚本 umask 077,tee 落成 600;keyring 由 _apt 用户(sqv)读,600 会拒签,必须放开
+    $SUDO chmod 644 /etc/apt/keyrings/nodesource.asc /etc/apt/sources.list.d/nodesource.list
     $SUDO apt-get update
     $SUDO apt-get install -y nodejs
     node_ok || die '装完 Node 还是不达标(要 ≥22.18),看看上面 apt 的报错'
@@ -188,10 +193,13 @@ Linux)
     $SUDO systemctl enable --now incus >/dev/null 2>&1 || true
     incus query /1.0 >/dev/null 2>&1 || die 'incus 服务端不可达:systemctl status incus 看看'
   fi
-  if [ "$(incus query /1.0/storage-pools)" = '[]' ]; then
+  # 空列表在 incus 6.0 上打印空串而不是 [](实测),两种都算"还没初始化"
+  case "$(incus query /1.0/storage-pools)" in
+  ''|'[]')
     say '初始化 incus(建默认存储池和网络)'
     incus admin init --minimal
-  fi
+    ;;
+  esac
   # Incus 只在 /etc/subuid 已有 root: 条目时进入受限模式:raw.idmap 要映的宿主 uid/gid
   # 必须被某个 root 段覆盖,否则沙箱 start 直接死(newuidmap … not allowed)。
   # 完全没有 root: 条目 = 全权模式,什么都不用做——**别改成无条件追加**,
@@ -206,7 +214,9 @@ Linux)
   }
   SUBID_CHANGED=0
   ensure_subid subuid "$(id -u)"
-  ensure_subid subgid "$(id -g)"
+  # 不能用裸 id -g:经 sg 续跑时它返回 incus-admin 的组号,补错了组,真跑 bot 的
+  # 进程(主组)在受限模式下沙箱起不来。按登录用户查 passwd 主组才不受 sg 影响
+  ensure_subid subgid "$(id -g "$(id -un)")"
   if [ "$SUBID_CHANGED" = 1 ]; then
     $SUDO systemctl restart incus   # incusd 只在启动时读 subuid
   fi
