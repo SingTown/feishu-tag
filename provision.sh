@@ -2,8 +2,7 @@
 # 群沙箱的出厂初始化,在沙箱内部以 root 跑一次(见 src/sandbox.ts)。
 # 用法: provision.sh <claudeCodeVersion>
 #
-# 幂等:每一步都是"没有才装",脚本改了哈希会变,bot 会对老沙箱重跑一遍
-# (对应旧 macOS 账号方案里的 provision.hash)。
+# 幂等:每一步都是"没有才装",脚本改了哈希会变,bot 会对老沙箱重跑一遍。
 # 沙箱不是一次性的:这里装的东西就长在它的文件系统里,不会因为升级而消失——
 # agent 后来自己 apt 装的包也一样,所以别把这个脚本当成"环境的唯一真相"去做清理。
 set -eu
@@ -49,9 +48,8 @@ chmod 440 /etc/sudoers.d/agent
 
 # /home/agent/.claude 是宿主 sandbox/<id>/claude 挂进来的(见 src/sandbox.ts)。
 # 挂载点先于 useradd 存在,useradd -m 就不补 skel、也不 chown home,这里补上。
-# **别 chown -R /home/agent**:.claude 那半的属主归宿主平台管(mac 走不做 uid 映射的 virtiofs,
-# 显示成 root/nobody 但 agent 照样读写;Linux 由 raw.idmap 映好),沙箱内没有一个 chown 是对的
-# ——mac 上白报错,Linux 上会连宿主那边的文件属主一起改。只动家目录本身那几个
+# **别 chown -R /home/agent**:.claude 那半的属主由宿主的 raw.idmap 映好,在沙箱内
+# chown 会穿透挂载、连宿主那边的文件属主一起改。只动家目录本身那几个
 cp -rn /etc/skel/. /home/agent/ 2>/dev/null || true
 chown agent:agent /home/agent
 chown agent:agent /home/agent/.bashrc /home/agent/.profile /home/agent/.bash_logout 2>/dev/null || true

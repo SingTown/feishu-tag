@@ -23,8 +23,6 @@ const SERVER_NAME = 'feishu'
 // 出方向(send_attachment)读的是工作区,那半没挂载,得走 sandbox.ts 的 copyFromSandbox;
 // 而且必须先落成宿主上的真实文件——上传飞书要经 form-data 算 Content-Length,
 // 它只认能 fs.stat 出大小的文件流,拿管道没办法。
-// 中转目录用 os.tmpdir()(/var/folders/…),别图省事写成 /tmp:macOS 的 /tmp 是软链,
-// 有些运行时往那儿写会报 "too many levels of symbolic links"
 
 // 和 bot 本体同一份凭证(index.ts 启动时已校验);tenant token 由 SDK 自动换新,只在内存
 let client: Client | null = null

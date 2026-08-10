@@ -5,7 +5,7 @@
 ## 前置条件
 
 - **一个能建自建应用的飞书账号** —— 要企业管理员,或者管理员给过「创建应用」权限。
-- **macOS 或 Linux 电脑**
+- **独立的新的 Linux 电脑** —— Debian 13+ / Ubuntu 24.04+,Windows 和 mac 用户可以用虚拟机
 - **一份模型令牌** —— Claude 订阅(`claude setup-token` 生成)或 Anthropic API key,二选一。
 
 ## 运行
@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/singtown/feishu-tag/main/install.sh
 
 1. 使用飞书扫码创建机器人
 2. 输入模型令牌
-3. 装完把机器人拉进群,@ 它说句话。mac 首次启动要建虚拟机,约几分钟;每个群第一次说话要建自己的沙箱,约 1 分钟
+3. 装完把机器人拉进群,@ 它说句话。每个群第一次说话要建自己的沙箱,约 1 分钟
 
 ## 特色
 

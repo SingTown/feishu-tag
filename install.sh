@@ -8,13 +8,13 @@
 #
 # 分工(2026-08-08 拍板):sh 只做「Node 存在之前」的事——
 # 装 node + incus、加组、收模型令牌直写 .env;唯一需要 SDK 的建应用一步交给
-# `npm run register`(register.ts 自己写 .env);收尾的开机自启(systemd / LaunchAgent)
+# `npm run register`(register.ts 自己写 .env);收尾的开机自启(systemd)
 # 也归 sh。凭证不跨语言边界:令牌 read -s 收下后
 # 本进程直写 .env,不进 argv、不进 ps、不回显;飞书凭证在 TS 进程内闭环。
 #
 # 踩坑清单,改之前看一眼:
-# - 这是 bash 不是 POSIX sh(read -s / trap / local 按 bash 3.2 的能力写,mac 自带的就是 3.2)。
-#   typecheck 罩不到本文件:改完先 `bash -n install.sh`,再真机跑。它也是全仓库最容易
+# - 这是 bash 不是 POSIX sh(read -s / trap / local)。typecheck 罩不到本文件:
+#   改完先 `bash -n install.sh`,再真机跑。它也是全仓库最容易
 #   随发行版世界漂移的文件,动 apt/NodeSource 那段必须 Debian/Ubuntu 真机验证。
 # - Linux 只支持 apt 系(Debian 13+ / Ubuntu 24.04+,incus 已进发行版仓库);其他发行版
 #   打印装法指引后退出。别试图写死各家装法——没法验证的分叉必腐烂,指引腐烂是软失败。
@@ -29,12 +29,9 @@
 #   incus 全权模式,无条件追加会把好机器改坏(详见 Linux 分支就地注释)。
 # - Docker 共存分两半:sudoers 白名单归这儿,插 DOCKER-USER 规则归 sandbox.ts 的
 #   ensureDockerCoexist;四条命令 sudoers 逐字匹配,两边必须一字不差。
-# - 平台分叉:运行时链路仍只有 sandbox.ts 的 ensureHostReady 一处;本文件是唯一例外
-#   (sh 进不了 TS,借不动)。这里只管「装没装」,起 colima、查存储池等运行态检查仍归
-#   ensureHostReady(npm start 时自动跑),别搬过来。
-# - 开机自启:node/npm/仓库路径在安装时写死,重跑按内容比对重写。plist 是 XML,路径里
-#   的 & / < 会写坏文件,落盘后必 plutil -lint;mac 停服务只能 bootout,KeepAlive 下
-#   stop / kill 都会被拉起。
+# - 本文件只管「装没装」;查存储池等运行态检查归 sandbox.ts 的 ensureHostReady
+#   (npm start 时自动跑),别搬过来。
+# - 开机自启:node/npm/仓库路径在安装时写死,重跑按内容比对重写。
 
 set -eu
 umask 077   # 本脚本创建的文件(.env / .env.bak)天生 600
@@ -78,14 +75,14 @@ env_set() {
 
 in_repo() { [ -f package.json ] && grep -q '"name": "feishu-tag"' package.json; }
 
-# 找到仓库根并 cd 进去,身边没有就 clone 到 ~/feishu-tag——mac「必须在 $HOME 下」的
-# 约束顺带自动满足。已 clone 过就直接用现有的,这里不 pull:拉新版归 maybe_update,
-# 确认制、不悄悄动本地。FEISHU_TAG_REPO 是测试缝隙(指到 file:// 本地镜像),平时不用碰
+# 找到仓库根并 cd 进去,身边没有就 clone 到 ~/feishu-tag。已 clone 过就直接用现有的,
+# 这里不 pull:拉新版归 maybe_update,确认制、不悄悄动本地。
+# FEISHU_TAG_REPO 是测试缝隙(指到 file:// 本地镜像),平时不用碰
 ensure_repo() {
   in_repo && return 0
   local dest="$HOME/feishu-tag"
   say "获取仓库到 $dest"
-  command -v git >/dev/null 2>&1 || die '缺 git:mac 跑 xcode-select --install,Debian/Ubuntu 跑 sudo apt-get install -y git,装完重跑'
+  command -v git >/dev/null 2>&1 || die '缺 git:sudo apt-get install -y git,装完重跑'
   if [ -d "$dest/.git" ]; then
     echo '已经 clone 过了,直接用现有的(有新版本的话稍后会问要不要升级)。'
   elif [ -e "$dest" ]; then
@@ -159,19 +156,6 @@ SUDO=sudo
 [ "$(id -u)" = 0 ] && SUDO=''
 
 case "$(uname -s)" in
-Darwin)
-  say '检查 Node 与沙箱运行时(brew)'
-  # 仓库不在 $HOME 下的话 colima 挂不进沙箱,晚炸不如现在炸(和 ensureHostReady 同一判断)
-  case "$PWD" in
-  "$HOME"/*) ;;
-  *) die "仓库必须放在 $HOME 之下(colima 只把 \$HOME 透进虚拟机),现在在 $PWD" ;;
-  esac
-  command -v brew >/dev/null 2>&1 || die '没有 Homebrew:先装 https://brew.sh ,或自己装好 node ≥22.18 / colima / incus 再重跑'
-  command -v node >/dev/null 2>&1 || brew install node
-  node_ok || die 'Node 太老(要 ≥22.18):brew upgrade node,或用 nvm'
-  command -v colima >/dev/null 2>&1 || brew install colima
-  command -v incus >/dev/null 2>&1 || brew install incus
-  ;;
 Linux)
   say '检查 Node 与沙箱运行时(apt)'
   command -v apt-get >/dev/null 2>&1 || die '自动安装目前只覆盖 apt 系(Debian 13+ / Ubuntu 24.04+)。
@@ -247,7 +231,7 @@ Linux)
   fi
   ;;
 *)
-  die "不支持的平台 $(uname -s):沙箱靠 Incus,只有 Linux 和 macOS 两条路"
+  die "不支持的平台 $(uname -s):沙箱靠 Incus,只支持 Linux"
   ;;
 esac
 echo '运行时就绪。'
@@ -305,13 +289,11 @@ fi
 say '装完了'
 echo '把机器人拉进飞书群,@ 它说句话。'
 echo '第一次会静默等约 1 分钟——那个群的专属沙箱正在建,不是坏了;之后每轮秒回。'
-[ "$(uname -s)" = Darwin ] && echo 'mac 首次启动要先建 colima 虚拟机,几分钟(设了自启的话进度在日志里)。'
 
-# ---- 开机自启:Linux systemd unit,mac LaunchAgent(登录自启)----
-# 服务上下文默认 PATH 很瘦,必须显式给;colima 不归服务层管,ensureHostReady 会起
+# ---- 开机自启:systemd unit ----
+# 服务上下文默认 PATH 很瘦,必须显式给
 
 UNIT_PATH=/etc/systemd/system/feishu-tag.service
-PLIST_PATH="$HOME/Library/LaunchAgents/local.feishu-tag.plist"
 
 unit_content() {
   cat <<EOF
@@ -330,30 +312,6 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-EOF
-}
-
-plist_content() {
-  cat <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>local.feishu-tag</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>$(command -v npm)</string>
-    <string>start</string>
-  </array>
-  <key>WorkingDirectory</key><string>$PWD</string>
-  <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>$(dirname "$(command -v node)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-  <key>StandardOutPath</key><string>$HOME/Library/Logs/feishu-tag.log</string>
-  <key>StandardErrorPath</key><string>$HOME/Library/Logs/feishu-tag.log</string>
-</dict>
-</plist>
 EOF
 }
 
@@ -398,37 +356,6 @@ autostart_linux() {
   echo '  日志 journalctl -u feishu-tag -f;启停 systemctl start|stop feishu-tag'
 }
 
-autostart_darwin() {
-  local content uid; content="$(plist_content)"; uid="$(id -u)"
-  if same_file "$content" "$PLIST_PATH" && launchctl print "gui/$uid/local.feishu-tag" >/dev/null 2>&1; then
-    if [ -n "${FEISHU_TAG_UPDATED:-}" ]; then
-      echo '重启服务,加载新代码……'
-      launchctl bootout "gui/$uid/local.feishu-tag" 2>/dev/null || true
-      launchctl bootstrap "gui/$uid" "$PLIST_PATH"
-      echo '升级完成,服务已在新代码上运行。'
-    else
-      echo '开机自启已配置(登录自启)。'
-    fi
-    return 0
-  fi
-  if ! confirm '设为开机自启并现在启动?(选 n 走前台 npm start)'; then
-    start_foreground; return 0
-  fi
-  mkdir -p "$HOME/Library/LaunchAgents"
-  launchctl bootout "gui/$uid/local.feishu-tag" 2>/dev/null || true
-  printf '%s\n' "$content" > "$PLIST_PATH"
-  chmod 644 "$PLIST_PATH"
-  plutil -lint "$PLIST_PATH" >/dev/null || die "生成的 plist 语法不对(路径里有 & 或 < ?),看看 $PLIST_PATH"
-  launchctl bootstrap "gui/$uid" "$PLIST_PATH"
-  echo '已启动,登录自启(无人值守需在系统设置开自动登录)。别再手动 npm start,会双连重复收消息。'
-  echo '  日志 tail -f ~/Library/Logs/feishu-tag.log'
-  echo "  停 launchctl bootout gui/$uid/local.feishu-tag(别用 stop,会被拉起)"
-  echo "  启 launchctl bootstrap gui/$uid $PLIST_PATH"
-}
-
 say '开机自启'
 echo '飞书长连接得一直开着;设成系统服务,开机自启、崩了自动拉起。'
-case "$(uname -s)" in
-Darwin) autostart_darwin ;;
-*) autostart_linux ;;
-esac
+autostart_linux

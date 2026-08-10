@@ -12,8 +12,6 @@ const execFile = promisify(execFileCb)
 //   sandboxName(chatId)  机器那半边(Incus 起的一台 Debian,`incus list` 看得到)
 //   sandboxDir(chatId)   宿主数据那半边(sandbox/<id>/,凭证正本 + 挂进机器的 ~/.claude)
 // 机器那半边随时可以删了重建,数据那半边不受影响。别把这两半混着说。
-// 另一个层次是 colima 提供的那台 Linux **虚拟机**:mac 上跑 Incus 守护进程用的宿主层,
-// 全局一台、所有群共用,不是沙箱。
 //
 // 沙箱跑的是完整的 Linux 系统:有 init、文件系统天生持久,agent 自己 apt 装的东西会一直留着,
 // 也不存在"镜像换代就得重建"这回事 —— 这是选 Incus 而不是 podman 的全部理由。
@@ -56,9 +54,7 @@ function sandboxName(chatId: string): string {
 
 /**
  * 本群凭证正本(secrets.ts)、待回访排期(followup.ts)和挂进机器当 `~/.claude` 的那份数据
- * 都在这儿。放在仓库目录下、且**仓库必须在 `$HOME` 之内**(ensureHostReady 会拦):
- * colima 只把宿主 `$HOME` 经 virtiofs 透进那台 Linux 虚拟机,incus 才挂得到。
- * 这样机器随时可以删了重建,会话记录、模型设置、长期记忆留在宿主这边不受影响。
+ * 都在这儿。机器随时可以删了重建,会话记录、模型设置、长期记忆留在宿主这边不受影响。
  */
 export const SANDBOX_ROOT = path.resolve('sandbox')
 export const sandboxDir = (chatId: string): string => path.join(SANDBOX_ROOT, sandboxId(chatId))
@@ -104,19 +100,13 @@ export async function writeAtomic(file: string, body: string, mode?: number): Pr
 
 /**
  * 宿主 `sandbox/<id>/claude` 挂进沙箱当 `~/.claude` 的那个 disk device。
- * **宿主 uid 怎么落进沙箱,两个平台的结论正好相反**,别把一边的搬到另一边:
- * - mac(经 colima):走 virtiofs,**不做 uid 映射**——目录在沙箱里属主显示成 root/nobody
- *   (跟宿主对不上)、权限位也不起作用,agent 照样读写,因为 virtiofs 根本不查。
- *   所以别在上面 chown(不生效),也别指望用权限做"agent 只读"那种语义;
- *   更别给它设 `shift=true`:virtiofs 没有 idmapped mount 能力,设了设备就再也起不来。
- * - Linux(原生):非特权沙箱有真的 uid 映射、权限位照常生效。宿主目录属主是跑 bot 的那个人,
- *   得靠 CLAUDE_IDMAP 映到 agent 头上,否则 agent 看到的是 nobody、一个字节都写不进去。
+ * 非特权沙箱有真的 uid 映射、权限位照常生效:宿主目录属主是跑 bot 的那个人,
+ * 得靠 CLAUDE_IDMAP 映到 agent 头上,否则 agent 看到的是 nobody、一个字节都写不进去。
  */
 const CLAUDE_DEVICE = 'claude'
 
 /**
- * Linux 上把宿主的 uid/gid 映成沙箱里的 agent(见 CLAUDE_DEVICE);mac 是 null,
- * 那条路不需要、设了反而出事。实测过的三件事,别凭直觉改:
+ * 把宿主的 uid/gid 映成沙箱里的 agent(见 CLAUDE_DEVICE)。实测过的三件事,别凭直觉改:
  * - **Incus 不会自动 idmap**。不设这个,目录在沙箱里就是 `65534:65534`,
  *   连沙箱内的 root 都读不了,agent 一个字节写不进去。
  * - **别图省事写 `both <uid> <agent>`**:宿主的 uid 和 gid 不一定相等(等于只映了 uid),
@@ -124,9 +114,7 @@ const CLAUDE_DEVICE = 'claude'
  * - `raw.idmap` 只在沙箱**启动时**读一次,改了必须重启才生效。
  */
 const IDMAP_KEY = 'raw.idmap'
-const CLAUDE_IDMAP = process.platform === 'linux'
-  ? `uid ${process.getuid!()} ${AGENT_ID}\ngid ${process.getgid!()} ${AGENT_ID}`
-  : null
+const CLAUDE_IDMAP = `uid ${process.getuid!()} ${AGENT_ID}\ngid ${process.getgid!()} ${AGENT_ID}`
 
 /** 给 CLI 的模型令牌;index.ts 的启动校验和 secrets.ts 的注入都认这份 */
 export const authEnv = {
@@ -198,7 +186,7 @@ const addClaudeDevice = (name: string, dir: string): Promise<unknown> => execFil
  * "规则已在",拦了反而误伤。
  */
 const IPTABLES = '/usr/sbin/iptables'
-let dockerCoexistDone = process.platform !== 'linux'
+let dockerCoexistDone = false
 let dockerCoexistWarned = false
 async function ensureDockerCoexist(): Promise<void> {
   if (dockerCoexistDone || !existsSync('/var/run/docker.sock')) return
@@ -244,13 +232,13 @@ async function doEnsure(chatId: string): Promise<void> {
     // 别设 security.idmap.size 去"配合"内层:6.0 无视它,7.x 真收窄反而埋雷。
     // 只在新建时设:存量沙箱手动补同一个键即可,和 raw.idmap 一样下次启动才生效
     await execFile(CLI, ['config', 'set', name, 'security.nesting=true'])
-    if (CLAUDE_IDMAP) await execFile(CLI, ['config', 'set', name, `${IDMAP_KEY}=${CLAUDE_IDMAP}`])
+    await execFile(CLI, ['config', 'set', name, `${IDMAP_KEY}=${CLAUDE_IDMAP}`])
     await addClaudeDevice(name, dataDir)
     await execFile(CLI, ['start', name])
     inst = await sandboxInfo(name)
   } else {
-    // 换了跑 bot 的用户、或从 mac 上的备份导过来,idmap 就对不上了,重启补正
-    if (CLAUDE_IDMAP && inst.config[IDMAP_KEY] !== CLAUDE_IDMAP) {
+    // 换了跑 bot 的用户、或从别的机器把数据导过来,idmap 就对不上了,重启补正
+    if (inst.config[IDMAP_KEY] !== CLAUDE_IDMAP) {
       await execFile(CLI, ['config', 'set', name, `${IDMAP_KEY}=${CLAUDE_IDMAP}`])
       if (inst.status === 'Running') await execFile(CLI, ['restart', name])
     }
@@ -436,49 +424,23 @@ function run(cmd: string, args: string[]): Promise<void> {
 }
 
 /**
- * 启动检查。能自动补的就自动补(mac 上的 colima 虚拟机),补不了的当场退出并给指引。
- * incus 的守护进程只跑在 Linux 上:Linux 就是本机那个,mac 上由 colima 提供那台 Linux 虚拟机。
- * 这是全仓库唯一按平台分叉的地方,别的模块只管调 incus 客户端。
+ * 启动检查:环境不齐当场退出并给指引,不拖到某个群第一次说话、建沙箱时才炸。
+ * 只支持 Linux;别的模块不感知平台,只管调 incus 客户端。
  */
 export async function ensureHostReady(): Promise<void> {
   const fatal = (msg: string) => {
     console.error(msg)
     process.exit(1)
   }
-  const mac = process.platform === 'darwin'
-  if (!mac && process.platform !== 'linux') {
-    fatal(`不支持的平台 ${process.platform}:沙箱靠 Incus,只有 Linux(原生)和 macOS(经 colima)两条路`)
+  if (process.platform !== 'linux') {
+    fatal(`不支持的平台 ${process.platform}:沙箱靠 Incus,只支持 Linux`)
   }
-  // 沙箱数据目录要挂进沙箱当 ~/.claude,而 colima 只把宿主 $HOME 透进虚拟机。
-  // 仓库放在别处的话 incus 挂不到这个路径,而且是建沙箱时才炸,所以启动就拦。
-  // Linux 没有虚拟机这一层,incus 直接挂宿主路径,放哪都行
-  const home = process.env.HOME
-  if (mac && (!home || !SANDBOX_ROOT.startsWith(`${home}${path.sep}`))) {
-    fatal(`仓库必须放在 ${home ?? '$HOME'} 之下(当前 ${process.cwd()}):` +
-      'sandbox 目录要挂进群沙箱,而 colima 只把 $HOME 经 virtiofs 透进那台 Linux 虚拟机')
-  }
-  await execFile(CLI, ['version']).catch(() => fatal(mac
-    ? '未找到 incus 客户端:brew install colima incus'
-    : '未找到 incus:装法见 https://linuxcontainers.org/incus/docs/main/installing/'))
-
-  if (mac) {
-    const status = await execFile('colima', ['status']).then((r) => r.stdout + r.stderr, () => '')
-    if (!status.includes('running')) {
-      console.log('[sandbox] colima 未运行,正在启动(首次要建虚拟机,几分钟)…')
-      await run('colima', ['start', '--runtime', 'incus']).catch((e) => fatal(`colima 启动失败:${e.message}`))
-    } else if (!status.includes('incus')) {
-      fatal('colima 正在运行,但 runtime 不是 incus:colima stop && colima start --runtime incus')
-    }
-  }
-  await execFile(CLI, ['query', '/1.0']).catch(() => fatal(mac
-    ? 'incus 服务端不可达:colima restart 之后重试'
-    : 'incus 服务端不可达:确认守护进程在跑(systemctl status incus),且当前用户在 incus-admin 组里(加完组要重新登录)'))
-
-  // incus 刚装完是没有存储池的,要跑一次 incus admin init。不拦的话要等某个群第一次说话、
-  // 建沙箱时才炸,而且报错看不出是这个原因。colima 的 incus 是配好的,不用查
-  if (!mac) {
-    const pools = await execFile(CLI, ['query', '/1.0/storage-pools'])
-      .then((r) => JSON.parse(r.stdout) as unknown[], () => [])
-    if (!pools.length) fatal('incus 还没初始化(一个存储池都没有):先跑一次 incus admin init')
-  }
+  await execFile(CLI, ['version']).catch(() =>
+    fatal('未找到 incus:装法见 https://linuxcontainers.org/incus/docs/main/installing/'))
+  await execFile(CLI, ['query', '/1.0']).catch(() =>
+    fatal('incus 服务端不可达:确认守护进程在跑(systemctl status incus),且当前用户在 incus-admin 组里(加完组要重新登录)'))
+  // incus 刚装完是没有存储池的,要跑一次 incus admin init;不拦的话建沙箱时才炸,报错看不出原因
+  const pools = await execFile(CLI, ['query', '/1.0/storage-pools'])
+    .then((r) => JSON.parse(r.stdout) as unknown[], () => [])
+  if (!pools.length) fatal('incus 还没初始化(一个存储池都没有):先跑一次 incus admin init')
 }
