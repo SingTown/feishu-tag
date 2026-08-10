@@ -5,7 +5,7 @@
 
 全仓库口径:隔离边界一律叫**沙箱**(`sandbox`)= 机器(Incus 起的 Debian,`feishu-tag-<id>`)
 + 宿主数据目录(`sandbox/<id>/`),两半都从 `sandboxId` 派生,机器可弃、数据留着。
-只支持 Linux 部署(macOS 兼容 2026-08 删除,动因见 git log)。
+只支持 Linux 部署(macOS 兼容 2026-08 删除,动因见 git log;Mac 上开发见下文专节)。
 
 部署与运维见 `README.md`(面向使用者);设计沿革与取舍在 `git log`;本文件只写改代码会踩的坑。
 **更细的坑单在各文件的头部和函数注释里,动哪个文件先读哪个**——留下来的注释都是
@@ -29,6 +29,30 @@ npm run register      # 建应用;改了权限清单也是重跑它,确认页选
   验 `sandbox/<id>/claude` 原样回来,用完连 `sandbox/<id>/` 一起删。
 - **shell**:`sh -n provision.sh`、`bash -n install.sh`;apt/NodeSource 段语法检查保不住,
   得 Debian/Ubuntu 真机装一遍;开机自启段还要重启验自启、kill 主进程验拉起。
+
+## 在 Mac 开发机上跑
+
+bot 只能在 Linux 跑(`ensureHostReady` 平台检查直接退出),Mac 本地只有 `npm run typecheck`
+走得通;运行和上面的"真跑"类验证都进 OrbStack 虚拟机 `feishu-tag-test`(Debian 13,
+incus/Node 已装好,`.env` 正本也只在 VM 侧)。代码在 Mac 改,单向同步进去跑:
+
+```bash
+# 都在仓库根执行;orb 会把 Mac 当前目录映射进 VM,所以源路径写 ./ 即可
+orb -m feishu-tag-test sh -c 'rsync -a --delete \
+  --exclude=node_modules --exclude=sandbox --exclude=.env --exclude=.git --exclude=probe.ts \
+  ./ ~/feishu-tag/'
+orb -m feishu-tag-test sh -c 'cd ~/feishu-tag && npm install && npm start'
+```
+
+- **`--delete` 下这几个 exclude 一个都不能少**:`.env`(凭证)和 `sandbox/`(会话记录唯一
+  副本)只存在 VM 侧,漏了就被 `--delete` 清掉;`node_modules` 有平台二进制,拷过去是坏的;
+  `probe.ts` 是留在 VM 的沙箱探针脚本。
+- **别在 `/mnt/mac`(virtiofs)路径下直接跑 bot**:`sandbox/<id>/claude` 挂进 Incus 后
+  权限位/idmap 不生效——这正是当年删 macOS 兼容的原因之一,VM 原生盘的 `~/feishu-tag`
+  副本就是为此存在。
+- 凭证不往 Mac 同步(Desktop 常开着 iCloud 同步);`npm run register` 也在 VM 里跑,
+  它读写的 `.env` 在那边。
+- VM 没了就 OrbStack 新建一台 Debian,进去跑 `./install.sh` 走标准 Linux 路线。
 
 ## 结构
 
