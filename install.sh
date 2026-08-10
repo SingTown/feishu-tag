@@ -27,8 +27,6 @@
 #   会展开出错,过滤重写没有转义问题。register.ts 的 envSet 是同款的 TS 版,改要一起改。
 # - subuid/subgid 修补是**条件式**的:已有 root: 条目才补当前 uid/gid,没有条目是
 #   incus 全权模式,无条件追加会把好机器改坏(详见 Linux 分支就地注释)。
-# - Docker 共存分两半:sudoers 白名单归这儿,插 DOCKER-USER 规则归 sandbox.ts 的
-#   ensureDockerCoexist;四条命令 sudoers 逐字匹配,两边必须一字不差。
 # - 本文件只管「装没装」;查存储池等运行态检查归 sandbox.ts 的 ensureHostReady
 #   (npm start 时自动跑),别搬过来。
 # - 开机自启:node/npm/仓库路径在安装时写死,重跑按内容比对重写。
@@ -219,25 +217,6 @@ Linux)
   ensure_subid subgid "$(id -g "$(id -un)")"
   if [ "$SUBID_CHANGED" = 1 ]; then
     $SUDO systemctl restart incus   # incusd 只在启动时读 subuid
-  fi
-  # Docker 共存:Docker 会把 FORWARD 默认策略改成 DROP,闷死沙箱的 IPv4 转发。
-  # 插放行规则的活在运行时(sandbox.ts 的 ensureDockerCoexist,规则重启就丢,得每次断言),
-  # 这里只发 sudo 白名单:四条**逐字匹配**的命令,iptables 路径和参数跟那边是一对,改要同步。
-  # docker 常常事后才装,所以无条件写;没 docker 时这四条命令无链可插,纯惰性授权
-  SUDOERS_PATH=/etc/sudoers.d/feishu-tag
-  if [ ! -e "$SUDOERS_PATH" ]; then
-    BRIDGE="$(incus network list -f csv | awk -F, '$2=="bridge" && $3=="YES" {print $1; exit}')"
-    if [ -n "$BRIDGE" ]; then
-      say "写 $SUDOERS_PATH(允许 bot 往 DOCKER-USER 链补 $BRIDGE 的放行,仅这四条命令)"
-      printf '%s ALL=(root) NOPASSWD: %s, %s, %s, %s\n' "$(id -un)" \
-        "/usr/sbin/iptables -C DOCKER-USER -i $BRIDGE -j ACCEPT" \
-        "/usr/sbin/iptables -I DOCKER-USER -i $BRIDGE -j ACCEPT" \
-        "/usr/sbin/iptables -C DOCKER-USER -o $BRIDGE -j ACCEPT" \
-        "/usr/sbin/iptables -I DOCKER-USER -o $BRIDGE -j ACCEPT" > sudoers.tmp
-      $SUDO visudo -c -q -f sudoers.tmp || { rm -f sudoers.tmp; die "生成的 sudoers 没过 visudo 校验(桥名 $BRIDGE 有怪字符?)"; }
-      $SUDO install -m 440 -o root -g root sudoers.tmp "$SUDOERS_PATH"
-      rm -f sudoers.tmp
-    fi
   fi
   ;;
 *)
