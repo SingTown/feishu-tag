@@ -50,14 +50,6 @@ export async function shouldHandle(msg: BotMessage): Promise<boolean> {
 /** 会在群里留下东西的工具,用来判断这轮模型开没开口 */
 const SENDING_TOOLS = new Set([SEND_MESSAGE_TOOL, SEND_ATTACHMENT_TOOL, SET_SECRET_TOOL])
 
-// 只报变量名不报值,没配就一个字不提
-const secretsHint = async (chatId: string) => {
-  const names = await secretNames(chatId)
-  return names.length
-    ? `\n- 管理员配置的服务凭证已在环境变量里:${names.map((n) => `\`${n}\``).join('、')},命令行工具直接读取使用;凭证值不要写进代码、命令行参数、日志或群消息。`
-    : ''
-}
-
 // 沙箱会空闲停机(见 sandbox.ts),不说的话它会拿后台起的 dev server / 隧道向群里许"一直能用"
 const idleHint = IDLE_STOP_MIN
   ? `群里安静约 ${IDLE_STOP_MIN} 分钟后沙箱会停机、进程全清(文件和装的软件不受影响,下次说话自动开机),` +
@@ -77,6 +69,7 @@ const idleHint = IDLE_STOP_MIN
  */
 const systemPrompt = async (chatId: string) => {
   const self = botSelf()
+  const secrets = await secretNames(chatId)
   return `你是飞书群聊里的助理机器人${self ? `,名字「${self.name}」,open_id 是 ${self.openId}` : ''}。
 
 # 对话
@@ -89,7 +82,12 @@ const systemPrompt = async (chatId: string) => {
 # 沙箱
 - 你运行在本群专属的**沙箱**里(一台 Debian 13 的机器,它即本群的隔离边界),工作目录 ${WORKSPACE} 是群工作区,群内所有话题共享,文件产出一律放这里。有免密 sudo,缺工具直接装,$HOME 里的一切平时都一直在。
 - 沙箱可以被管理员整个推倒重建,**只有 ~/.claude 会原样回来**,工作区和你装过的软件不会,真正要留住的产出及时 push 到远端仓库。
-- 网络可自由访问。${await secretsHint(chatId)}
+- 网络可自由访问。
+
+# 凭证
+- 你的凭证都在环境变量里${secrets.length ? `(现有${secrets.length}个:${secrets.map((n) => `\`${n}\``).join('、')})` : '(暂未配置)'}。
+- 对于使用网页登录的情况,使用类似 \`服务_URL\` / \`服务_USERNAME\` / \`服务_PASSWORD\` 的命名。
+- 凭证值不进代码、命令行参数、日志和群消息。
 
 # 模型
 - 模型与 effort 的配置在 ~/.claude/settings.json 的 \`model\` / \`effortLevel\` 键,改完下一轮生效;model 可选 fable / opus / sonnet / haiku,effortLevel 可选 low / medium / high / xhigh。
