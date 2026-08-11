@@ -12,9 +12,9 @@ process.chdir(path.resolve(fileURLToPath(import.meta.url), '../..'))
  * 建飞书应用的命令入口(`npm run register`)。确认页上既能新建,也能**选择已有应用**——
  * 后者就是「给现网应用增量开通权限」的运维路径:改了下面的清单后重跑本命令,
  * 确认页选中原来那个应用即可,app_id 和 secret 都不会变。
- * install.sh 调它,人也可以直接跑;不在运行时链路上;要用户拿手机飞书确认。
- * 凭证直接写 .env、不打印——飞书凭证全程不出这个进程,不跨给 sh
- * (模型令牌那半是 install.sh 自己收自己写,同样不进这里)。
+ * install.sh 装完后由用户自己跑(安装器全程零交互,不代跑);不在运行时链路上;
+ * 要用户拿手机飞书确认。凭证直接写 .env、不打印——飞书凭证全程不出这个进程
+ * (模型令牌那半由用户直接写 .env,同样不进这里)。
  */
 
 // 权限策略(2026-08-08 拍板):走**平台默认模板**(preset:true)——路线图会用到里面的
@@ -107,8 +107,7 @@ const readEnv = (): Promise<string> => readFile(ENV_PATH, 'utf8').catch(() => ''
 
 /**
  * 写 .env:过滤旧键再追加。值不经过正则/sed 替换,密钥里出现 `$&` 之类序列没有转义问题;
- * install.sh 的 env_set 是同款的 sh 版,改要一起改。临时文件带 600 建好再 rename,
- * 读的那侧任何时刻拿到的都是完整文件。
+ * 临时文件带 600 建好再 rename,读的那侧任何时刻拿到的都是完整文件。
  */
 async function envSet(pairs: Array<[key: string, value: string]>): Promise<void> {
   const kept = (await readEnv()).split('\n')

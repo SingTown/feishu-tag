@@ -52,7 +52,9 @@ orb -m feishu-tag-test sh -c 'cd ~/feishu-tag && npm install && npm start'
   副本就是为此存在。
 - 凭证不往 Mac 同步(Desktop 常开着 iCloud 同步);`npm run register` 也在 VM 里跑,
   它读写的 `.env` 在那边。
-- VM 没了就 OrbStack 新建一台 Debian,进去跑 `./install.sh` 走标准 Linux 路线。
+- VM 没了就 OrbStack 新建一台 Debian:默认用户是 uid 501(跟随 macOS),过不了
+  install.sh 的 uid/gid 1000 检查,先建 uid/gid 1000 的 sudo 用户,再用它跑
+  `./install.sh` 走标准 Linux 路线。
 
 ## 结构
 

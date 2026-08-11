@@ -14,9 +14,11 @@
 curl -fsSL https://raw.githubusercontent.com/singtown/feishu-tag/main/install.sh | bash
 ```
 
-1. 使用飞书扫码创建机器人
-2. 输入模型令牌
-3. 装完把机器人拉进群,@ 它说句话。每个群第一次说话要建自己的沙箱,约 1 分钟
+装完还差两步配置(重跑脚本即升级,配置只做一次):
+
+1. `cd ~/feishu-tag && npm run register`,用飞书扫码创建机器人,凭证自动写进 `.env`
+2. 把模型令牌写进 `~/feishu-tag/.env`(键名见 `.env.example`),然后 `sudo systemctl start feishu-tag`
+3. 把机器人拉进群,@ 它说句话。每个群第一次说话要建自己的沙箱,约 1 分钟
 
 ## 特色
 

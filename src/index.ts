@@ -8,6 +8,7 @@ import { startFollowupScheduler, wakeMessage } from './followup.ts'
 // 副作用:漏 catch 的新代码不会再崩,只能查日志发现
 process.on('unhandledRejection', (err) => console.error('[bot] 未捕获的 Promise 拒绝:', err))
 
+// install.sh 装完判断要不要立即启动服务,照抄的就是这两段检查的环境变量清单,改要一起改
 const { FEISHU_BOT_ID, FEISHU_BOT_SECRET } = process.env
 if (!FEISHU_BOT_ID || !FEISHU_BOT_SECRET) {
   console.error('请设置环境变量 FEISHU_BOT_ID 和 FEISHU_BOT_SECRET(可写在 .env 文件里,参考 .env.example)')

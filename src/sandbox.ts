@@ -18,10 +18,12 @@ const execFile = promisify(execFileCb)
 // 别为了"更像标准镜像"改回不可变那套,那会让每次升级 CLI 都把各群攒下来的环境清零。
 
 const CLI = 'incus'
-// 出厂镜像只在建沙箱那一次用。沙箱建好后自己演进,改这个值不会影响已有的群
+// 出厂镜像只在建沙箱那一次用。沙箱建好后自己演进,改这个值不会影响已有的群。
+// install.sh 预拉取写死了同一个默认值,改要一起改
 const BASE_IMAGE = process.env.SANDBOX_BASE_IMAGE || 'images:debian/13'
 
-/** agent 在沙箱内的身份与路径。provision.sh 和 system prompt 写死了同一份,改要一起改 */
+/** agent 在沙箱内的身份与路径。provision.sh 和 system prompt 写死了同一份;
+ * install.sh 开头的宿主 uid/gid 检查也钉在同一个 1000(shift 恒等映射),改要一起改 */
 const AGENT_HOME = '/home/agent'
 export const WORKSPACE = `${AGENT_HOME}/workspace`
 const AGENT_ID = '1000'
@@ -100,21 +102,11 @@ export async function writeAtomic(file: string, body: string, mode?: number): Pr
 
 /**
  * 宿主 `sandbox/<id>/claude` 挂进沙箱当 `~/.claude` 的那个 disk device。
- * 非特权沙箱有真的 uid 映射、权限位照常生效:宿主目录属主是跑 bot 的那个人,
- * 得靠 CLAUDE_IDMAP 映到 agent 头上,否则 agent 看到的是 nobody、一个字节都写不进去。
+ * 属主对齐靠 `shift=true`(idmapped mount,**恒等映射**):宿主 uid/gid 1000 的文件
+ * 在沙箱里就是 agent(1000)的。不带 shift 挂进去是 `65534:65534`,agent 一个字节都写不进去。
+ * 恒等映射成立的前提是宿主跑 bot 的用户恰好 uid/gid 1000——install.sh 开头把这检查死了,改要一起改。
  */
 const CLAUDE_DEVICE = 'claude'
-
-/**
- * 把宿主的 uid/gid 映成沙箱里的 agent(见 CLAUDE_DEVICE)。实测过的三件事,别凭直觉改:
- * - **Incus 不会自动 idmap**。不设这个,目录在沙箱里就是 `65534:65534`,
- *   连沙箱内的 root 都读不了,agent 一个字节写不进去。
- * - **别图省事写 `both <uid> <agent>`**:宿主的 uid 和 gid 不一定相等(等于只映了 uid),
- *   另一半会掉成 nobody,agent 建的文件在宿主那边属主就不对了。uid/gid 各映一行。
- * - `raw.idmap` 只在沙箱**启动时**读一次,改了必须重启才生效。
- */
-const IDMAP_KEY = 'raw.idmap'
-const CLAUDE_IDMAP = `uid ${process.getuid!()} ${AGENT_ID}\ngid ${process.getgid!()} ${AGENT_ID}`
 
 /** 给 CLI 的模型令牌;index.ts 的启动校验和 secrets.ts 的注入都认这份 */
 export const authEnv = {
@@ -171,6 +163,7 @@ async function sandboxInfo(name: string): Promise<Sandbox | null> {
 
 const addClaudeDevice = (name: string, dir: string): Promise<unknown> => execFile(CLI, [
   'config', 'device', 'add', name, CLAUDE_DEVICE, 'disk', `source=${dir}`, `path=${AGENT_HOME}/.claude`,
+  'shift=true',
 ])
 
 /**
@@ -185,23 +178,17 @@ async function doEnsure(chatId: string): Promise<void> {
   if (!inst) {
     console.log(`[sandbox] 新建群沙箱 ${name}(首次要拉基础镜像)…`)
     // create → 配置 → 挂盘 → start 而不是 launch:
-    // 挂载点和 uid 映射都要赶在沙箱第一次跑 provision 之前就位
+    // 挂载点要赶在沙箱第一次跑 provision 之前就位
     await run(CLI, ['create', BASE_IMAGE, name])
     // 嵌套全开:沙箱里能再起一层容器(agent 装 Docker、开发本项目起探针沙箱都靠它)。
     // 内层 Incus 出厂就装好配好(subuid 缩窄、关 AppArmor、preseed 建网),见 provision.sh。
     // 别设 security.idmap.size 去"配合"内层:6.0 无视它,7.x 真收窄反而埋雷。
-    // 只在新建时设:存量沙箱手动补同一个键即可,和 raw.idmap 一样下次启动才生效
+    // 只在新建时设:存量沙箱手动补同一个键即可,下次启动才生效
     await execFile(CLI, ['config', 'set', name, 'security.nesting=true'])
-    await execFile(CLI, ['config', 'set', name, `${IDMAP_KEY}=${CLAUDE_IDMAP}`])
     await addClaudeDevice(name, dataDir)
     await execFile(CLI, ['start', name])
     inst = await sandboxInfo(name)
   } else {
-    // 换了跑 bot 的用户、或从别的机器把数据导过来,idmap 就对不上了,重启补正
-    if (inst.config[IDMAP_KEY] !== CLAUDE_IDMAP) {
-      await execFile(CLI, ['config', 'set', name, `${IDMAP_KEY}=${CLAUDE_IDMAP}`])
-      if (inst.status === 'Running') await execFile(CLI, ['restart', name])
-    }
     if (inst.status !== 'Running') await execFile(CLI, ['start', name])
     // 设备只可能因"create 成功、挂盘前崩了"而缺,补挂接上中断的新建流程;别删这行当它冗余
     if (!(CLAUDE_DEVICE in inst.devices)) await addClaudeDevice(name, dataDir)
