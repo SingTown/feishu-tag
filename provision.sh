@@ -73,10 +73,12 @@ install -d /etc/systemd/system/incus.service.d
 printf '[Service]\nEnvironment=INCUS_SECURITY_APPARMOR=false\n' \
   > /etc/systemd/system/incus.service.d/override.conf
 
-# 故意不加 --no-install-recommends:dnsmasq-base 等在 Recommends 里,缺了建不了网
+# 装 incus-base(container-only)而不是 incus:元包硬依赖整套 QEMU/VM 栈(qemu/ovmf/swtpm,
+# 连带 GUI 依赖几百 MB,群的第一条消息就堵在这个下载上),而沙箱里没有 /dev/kvm,VM 本来就起不来。
+# 故意不加 --no-install-recommends:dnsmasq-base 在 incus-base 的 Recommends 里,缺了建不了网
 if ! command -v incus >/dev/null 2>&1; then
   apt-get update -qq
-  apt-get install -y -qq incus
+  apt-get install -y -qq incus-base
 fi
 
 # 建网单独守卫,装包成功但 init 失败的话下次重跑能自愈。子网写死:自动探测在嵌套里必失败,
