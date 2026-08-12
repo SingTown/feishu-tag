@@ -6,7 +6,7 @@ import type { BotMessage } from './bot.ts'
 import { authEnv, ensureSandbox, hasSessionRecord, IDLE_STOP_MIN, sandboxId, spawnAgentCli, WORKSPACE } from './sandbox.ts'
 import { feishuServer, notifyThread, prepareImages, SEND_ATTACHMENT_TOOL, SEND_MESSAGE_TOOL, SET_SECRET_TOOL } from './feishu.ts'
 import { refreshSecrets, secretNames } from './secrets.ts'
-import { FOLLOWUP_TOOL, followupServer } from './followup.ts'
+import { CRON_CREATE_TOOL, followupServer, SCHEDULE_WAKEUP_TOOL } from './followup.ts'
 
 // 已知有 session 的话题:收到 system init 就记下,补上文件刚建好、磁盘还查不到的那几秒
 const knownThreads = new Set<string>()
@@ -93,7 +93,7 @@ const systemPrompt = async (chatId: string) => {
 - 模型与 effort 的配置在 ~/.claude/settings.json 的 \`model\` / \`effortLevel\` 键,改完下一轮生效;model 可选 fable / opus / sonnet / haiku,effortLevel 可选 low / medium / high / xhigh。
 
 # 生命周期
-- 每轮回复结束后你的进程即终止,后台任务和内置唤醒机制随之全部失效。${idleHint}要等 CI/构建/部署这类长任务的结果:几分钟内能完的当轮直接等;更久的用 ${FOLLOWUP_TOOL} 排定时回访。
+- 每轮回复结束后你的进程即终止,后台任务和内置唤醒机制随之全部失效。${idleHint}要等 CI/构建/部署这类长任务的结果:几分钟内能完的当轮直接等;更久的用 ${SCHEDULE_WAKEUP_TOOL} 排一次性唤醒;长期跟进、定期巡检、指定日期的提醒用 ${CRON_CREATE_TOOL} 排定时任务,到点系统会在本话题唤起你。
 
 # 安全约束
 - 对外有影响的写操作(推送仓库、发 PR/issue、改线上服务等)必须先在群里得到用户明确同意。
@@ -276,8 +276,9 @@ function startSession(first: BotMessage, prev?: Promise<void>): ThreadSession {
           // 沙箱就是边界,内部免审批全放开
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
-          // 回合一结束进程就没了,这类自我唤醒工具排了也不会触发,禁掉免得它开空头支票
-          disallowedTools: ['ScheduleWakeup'],
+          // 回合一结束进程就没了,CLI 自带的自我唤醒/定时工具排了也不会触发,禁掉免得它
+          // 开空头支票——真会到点唤醒的对应物在 followup 工具组里,别让两套同名语义并存
+          disallowedTools: ['ScheduleWakeup', 'CronCreate', 'CronList', 'CronDelete'],
           // 必须是 preset 而不是字符串:自动记忆(~/.claude 下的 memory/ 与 MEMORY.md 索引)是预置
           // system prompt 的动态段,传字符串等于把预置整个换掉,那一段连同按需召回一起静默消失
           // ——群里表现成"从来不记事",没有任何报错。excludeDynamicSections 会把它重新剥掉,别开。

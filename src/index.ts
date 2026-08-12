@@ -2,7 +2,7 @@ import { FeishuBot } from './bot.ts'
 import { authEnv, ensureHostReady, startIdleReaper } from './sandbox.ts'
 import { hasActiveSandbox, replyWithAgent, shouldHandle } from './agent.ts'
 import { ackReceipt, handleSecretCardAction } from './feishu.ts'
-import { startFollowupScheduler, wakeMessage } from './followup.ts'
+import { startFollowupScheduler } from './followup.ts'
 
 // 飞书 SDK 在定时器里发请求、Promise 被 void 掉,业务侧挂不上 catch,不能让它带崩长连接进程。
 // 副作用:漏 catch 的新代码不会再崩,只能查日志发现
@@ -39,8 +39,8 @@ bot.onMessage(async (msg) => {
 await bot.start()
 console.log('[feishu-bot] 长连接已建立,等待群聊 @消息与话题内追问')
 
-// 定时回访(见 followup.ts)。放 start() 之后:停机期间过期的排期会立即补火,得等长连接就绪
-await startFollowupScheduler((f) => replyWithAgent(wakeMessage(f)))
+// 定时唤醒(见 followup.ts)。放 start() 之后:停机期间过期的排期会立即补火,得等长连接就绪
+await startFollowupScheduler(replyWithAgent)
 
 // 空闲沙箱停机回收(见 sandbox.ts)。活会话表在 agent.ts,注进去避免 sandbox.ts 反向依赖它。
 // 放回访之后:补火那一批刚把沙箱用起来,先让它们进活会话表,免得第一轮扫描误判空闲
