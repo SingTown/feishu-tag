@@ -3,7 +3,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { botSelf } from './bot.ts'
 import type { BotMessage } from './bot.ts'
-import { authEnv, ensureSandbox, hasSessionRecord, IDLE_STOP_MIN, sandboxId, spawnAgentCli, WORKSPACE } from './sandbox.ts'
+import { AGENT_CLI, authEnv, ensureSandbox, hasSessionRecord, IDLE_STOP_MIN, sandboxId, spawnAgentCli, WORKSPACE } from './sandbox.ts'
 import { feishuServer, notifyThread, prepareImages, SEND_ATTACHMENT_TOOL, SEND_MESSAGE_TOOL, SET_SECRET_TOOL } from './feishu.ts'
 import { refreshSecrets, secretNames } from './secrets.ts'
 import { CRON_CREATE_TOOL, followupServer, SCHEDULE_WAKEUP_TOOL } from './followup.ts'
@@ -284,6 +284,10 @@ function startSession(first: BotMessage, prev?: Promise<void>): ThreadSession {
           // ——群里表现成"从来不记事",没有任何报错。excludeDynamicSections 会把它重新剥掉,别开。
           systemPrompt: { type: 'preset', preset: 'claude_code', append: (await systemPrompt(chatId)) + backfillHint },
           spawnClaudeCodeProcess: (opts) => spawnAgentCli(chatId, opts),
+          // 不传的话 SDK 会去解析宿主上的原生二进制、找不到就抛错;install.sh 的
+          // npm ci --omit=optional 靠这行成立,改要一起改。
+          // 值不能以 .js / .mjs / .ts 结尾:SDK 会当脚本,塞进参数首位交给 node 跑
+          pathToClaudeCodeExecutable: AGENT_CLI,
           // 凭证实际是注入沙箱配置的(见 secrets.ts),这里给最小集只为压住 SDK:
           // 不传的话它会把 bot 的整个环境塞进 opts.env,spawnAgentCli 要逐个告警刷屏
           env: authEnv,

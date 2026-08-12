@@ -66,7 +66,8 @@ git pull --ff-only
 env_has() { [ -f .env ] && grep -q "^$1=" .env; }
 
 # ci 不是 install:严格按 package-lock 装、从不写回它——lockfile 永不变脏,上面的 git pull 才裸得起来
-npm ci
+# omit dev/optional:服务器不 typecheck、不构建;optional 里那个 claude 原生二进制宿主不执行
+npm ci --omit=dev --omit=optional
 
 # ---- 开机自启:systemd unit ----
 # 服务上下文默认 PATH 很瘦,必须显式给

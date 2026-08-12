@@ -28,6 +28,9 @@ const AGENT_HOME = '/home/agent'
 export const WORKSPACE = `${AGENT_HOME}/workspace`
 const AGENT_ID = '1000'
 
+/** 沙箱里的 CLI(provision.sh 装的)。agent.ts 拿它当 pathToClaudeCodeExecutable 传给 SDK,两边得同一个值 */
+export const AGENT_CLI = 'claude'
+
 const PROVISION = path.resolve('provision.sh')
 const CLI_VERSION: string = JSON.parse(readFileSync(
   path.resolve('node_modules/@anthropic-ai/claude-agent-sdk/package.json'), 'utf8',
@@ -212,6 +215,7 @@ const AS_AGENT = ['--user', AGENT_ID, '--group', AGENT_ID, '--env', `HOME=${AGEN
 /**
  * 把 CLI 起进群沙箱(SDK 的 spawnClaudeCodeProcess 钩子):
  * exec 进沙箱,cwd 固定在工作区,stream-json 原样走 exec 的 stdio。
+ * opts.command 不用:宿主上没有 CLI 二进制,跑的是沙箱里的 AGENT_CLI。
  * **必须带 -T**:否则 incus 会分配 pty,流会变行缓冲还带回显。
  * signal 中止宿主侧客户端时,沙箱内的进程会跟着被杀(与 ssh 的 SIGHUP 同义),不留孤儿。
  */
@@ -224,7 +228,7 @@ export function spawnAgentCli(chatId: string, opts: CliSpawnOptions): SpawnedPro
   }
   return spawn(CLI, [
     'exec', sandboxName(chatId), '-T', '--cwd', WORKSPACE, ...AS_AGENT,
-    '--', 'claude', ...opts.args,
+    '--', AGENT_CLI, ...opts.args,
   ], {
     stdio: ['pipe', 'pipe', 'pipe'],
     // 只给 incus 客户端自己要用的;bot 的其他环境变量(飞书密钥等)不进沙箱
