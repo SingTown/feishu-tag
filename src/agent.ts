@@ -4,7 +4,7 @@ import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { botSelf } from './bot.ts'
 import type { BotMessage } from './bot.ts'
 import { AGENT_CLI, authEnv, ensureSandbox, hasSessionRecord, IDLE_STOP_MIN, sandboxId, spawnAgentCli, WORKSPACE } from './sandbox.ts'
-import { feishuServer, notifyThread, prepareImages, SEND_ATTACHMENT_TOOL, SEND_MESSAGE_TOOL, SET_SECRET_TOOL } from './feishu.ts'
+import { errText, feishuServer, notifyThread, prepareImages, SEND_ATTACHMENT_TOOL, SEND_MESSAGE_TOOL, SET_SECRET_TOOL } from './feishu.ts'
 import { refreshSecrets, secretNames } from './secrets.ts'
 import { CRON_CREATE_TOOL, followupServer, SCHEDULE_WAKEUP_TOOL } from './followup.ts'
 
@@ -244,7 +244,7 @@ function startSession(first: BotMessage, prev?: Promise<void>): ThreadSession {
     const reportError = async (note: string, scope: Entry[]) => {
       if (!scope.some((e) => e.mentionedBot)) return
       try {
-        await notifyThread(threadId, `⚠️ ${note}`)
+        await notifyThread(threadId, `⚠️ ${note}\nchat=${chatId} thread=${threadId}`)
       } catch (err) {
         console.error(`[agent] 报错卡也发不出去 chat=${chatId} thread=${threadId}:`, err)
       }
@@ -314,8 +314,11 @@ function startSession(first: BotMessage, prev?: Promise<void>): ThreadSession {
           pending.length = 0
           pending.push(...rest)
           if (m.is_error) {
-            console.error(`[agent] 回合失败(${m.subtype}) chat=${chatId} thread=${threadId}`)
-            await reportError(`agent 出错(${m.subtype})`, turn)
+            // 出错结果的 subtype 照样是 'success',原因在 result 里;error_* 那几个才自带含义,细节在 errors
+            const reason =
+              (m.subtype === 'success' ? m.result : [m.subtype, ...m.errors].join(' ')).trim() || '没给原因'
+            console.error(`[agent] 回合失败 chat=${chatId} thread=${threadId}: ${reason}`)
+            await reportError(`agent 出错: ${reason}`, turn)
           }
           if (!sends) {
             const unmentioned = turn.every((e) => !e.mentionedBot)
@@ -331,7 +334,8 @@ function startSession(first: BotMessage, prev?: Promise<void>): ThreadSession {
       }
     } catch (err) {
       console.error('[agent] 调用出错:', err)
-      await reportError('出错了,请稍后再试', pending)
+      // 不用截断,长度由 notifyThread 兜
+      await reportError(`出错了: ${errText(err)}`, pending)
     } finally {
       // 进程没了,堵死往死会话里塞消息的缝(登记表要等 done 落定才摘)
       closing = true

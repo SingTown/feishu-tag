@@ -35,7 +35,7 @@ const cli = () =>
 /** 飞书的报错藏在 response.data 里,原样带出模型才说得出缺哪个权限 */
 const respond = (fn: () => Promise<string>) => mcpRespond(fn, errText)
 
-function errText(err: any): string {
+export function errText(err: any): string {
   const d = err?.response?.data
   if (d && typeof d === 'object' && !d.pipe) return JSON.stringify(d)
   if (typeof d === 'string') return d
@@ -251,9 +251,12 @@ async function sendMessage(threadId: string, content: string): Promise<string> {
   return '已发进本话题'
 }
 
-/** 代码自己往群里说话的唯一出口:agent 崩了没法开口时的报错卡(见 agent.ts)。抛错交调用方 catch */
+/**
+ * 代码自己往群里说话的唯一出口:agent 崩了没法开口时的报错卡(见 agent.ts)。抛错交调用方 catch。
+ * 报错文本长度不可控,在这里统一截断,调用方不用各自记得截。
+ */
 export async function notifyThread(threadId: string, text: string): Promise<void> {
-  await replyToThread(threadId, 'interactive', markdownCard(text))
+  await replyToThread(threadId, 'interactive', markdownCard(truncate(text)))
 }
 
 /**
